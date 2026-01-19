@@ -2,14 +2,33 @@
 .build/
 .swiftpm/
 Packages.resolved
+*.swiftdoc
+*.swiftmodule
+*.swiftsourceinfo
 
 # macOS
 .DS_Store
 *.app/
+*.dSYM/
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
 
 # IDEs
 .idea/
 .vscode/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
 
 # Trae
 .trae/
+
+# Audio Outputs (Recordings)
+*.m4a
+*.wav
+*.mp3
