@@ -2,6 +2,8 @@
 
 一款专业、高保真的 macOS 音频录制工具，专为捕获微信实时语音通话设计。基于 macOS 原生的 **ScreenCaptureKit** 和 **AVFoundation** 框架构建。
 
+English version: [README.md](README.md)
+
 ## 功能特性
 
 - **双轨录制**：同时捕获系统音频（对方声音）和麦克风输入（自己的声音）。
@@ -9,12 +11,38 @@
 - **智能应用检测**：自动过滤并优先识别微信应用，实现无缝捕获。
 - **原生性能**：采用 SwiftUI 和 ScreenCaptureKit 开发，性能卓越，CPU 占用率极低。
 - **隐私优先**：所有处理均在本地完成，具有清晰的权限管理机制。
+- **会议纪要（阿里云听悟 + OSS）**：手动触发流水线进行转写和结构化纪要生成（摘要 / 要点 / 待办），并支持导出 Markdown。
 
 ## 环境要求
 
 - **操作系统**：macOS 13.0 (Ventura) 或更高版本。
 - **硬件**：任何支持 macOS 13.0+ 的 Mac 设备。
 - **开发工具**：Xcode 14.1+（用于编译和签名）。
+
+## 技术架构
+
+```mermaid
+flowchart LR
+  subgraph Local["本地（macOS App）"]
+    A["AudioRecorder<br/>ScreenCaptureKit + AVFoundation"] --> B["音轨合并<br/>对方 + 自己"]
+    B --> C["MeetingTask"]
+    C --> D["MeetingPipelineManager<br/>状态机流水线"]
+    D -->|转码| E["AVAssetExportSession<br/>mixed_48k.m4a"]
+    D -->|持久化| J["DatabaseManager<br/>SQLite"]
+    D -->|配置| S["SettingsStore"]
+    S --> K["KeychainHelper<br/>AK/SK"]
+    J --> V["SwiftUI 视图<br/>SettingsView / PipelineView / ResultView"]
+  end
+
+  subgraph Cloud["阿里云"]
+    F["OSSService<br/>PutObject"] --> G["OSS Bucket<br/>公共 URL"]
+    T["TingwuService<br/>CreateTask / GetTaskInfo"] --> R["听悟离线转写<br/>纪要 JSON"]
+  end
+
+  D -->|上传| F
+  G -->|FileUrl| T
+  T -->|结果| D
+```
 
 ## 项目结构
 
@@ -25,7 +53,7 @@
 
 ## 快速开始
 
-### 1. 编译与运行
+### 1. 编译与运行（推荐）
 
 由于 macOS 的安全机制（ScreenCaptureKit 需要特定的权限和签名），我们提供了一个便捷脚本用于本地执行：
 
@@ -43,12 +71,26 @@ open WeChatVoiceRecorder.app
 
 请在 **系统设置 > 隐私与安全性** 中授予这些权限。
 
-### 3. 音频输出
+### 3. 配置听悟 + OSS（可选）
 
-录音文件将保存至您的 `下载 (Downloads)` 目录，命名规则如下：
+在应用内打开 Settings 并配置：
+- 阿里云 AccessKeyId / AccessKeySecret（保存到 Keychain）
+- 听悟 AppKey
+- OSS bucket / region / prefix
+
+### 4. 音频输出
+
+原始录音文件将保存至您的 `下载 (Downloads)` 目录，命名规则如下：
+
 - `remote_[时间戳]_[ID].m4a`：对方的声音。
 - `local_[时间戳]_[ID].m4a`：您的声音。
 - `mixed_[时间戳]_[ID].m4a`：合成后的对话内容。
+
+### 5. 生成会议纪要
+
+录音完成后，界面会出现最新任务的流水线节点，按顺序手动触发：
+- 转码 → 上传 → 创建任务 → 刷新状态
+- 查看结果 → 导出 Markdown
 
 ## 开发与调试
 
@@ -64,9 +106,15 @@ xed .
 
 - [x] 双轨录制 (对方 + 自己)
 - [x] 自动音频合成
-- [ ] 集成阿里云 ASR 实现语音转文字
+- [x] 集成阿里云听悟离线转写 + 会议纪要生成
+- [x] 集成 OSS 上传
+- [x] 手动触发流水线 UI（转码/上传/创建/轮询）
 - [ ] 说话人识别 (基于云端方案)
 - [ ] 实时转写 UI 界面
+
+## 联系方式
+
+sherlock.yin1994@gmail.com
 
 ## 开源协议
 

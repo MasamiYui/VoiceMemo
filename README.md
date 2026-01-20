@@ -2,6 +2,8 @@
 
 A professional, high-fidelity audio recording utility for macOS, specifically designed to capture real-time WeChat voice conversations using the native **ScreenCaptureKit** and **AVFoundation** frameworks.
 
+Read this in Chinese: [README_CN.md](README_CN.md)
+
 ## Features
 
 - **Dual-Track Recording**: Simultaneously captures system audio (remote voice) and microphone input (local voice).
@@ -9,12 +11,38 @@ A professional, high-fidelity audio recording utility for macOS, specifically de
 - **Intelligent App Detection**: Automatically filters and prioritizes WeChat for seamless capture.
 - **Native Performance**: Built with SwiftUI and ScreenCaptureKit for optimal performance and low CPU overhead.
 - **Privacy-First**: Operates locally on your machine with clear permission handling.
+- **Meeting Minutes (Alibaba Cloud Tingwu + OSS)**: Manual pipeline to transcribe audio and generate structured minutes (summary, key points, action items), with Markdown export.
 
 ## Requirements
 
 - **OS**: macOS 13.0 (Ventura) or later.
 - **Hardware**: Any Mac supporting macOS 13.0+.
 - **Development**: Xcode 14.1+ for building and signing.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Local["Local (macOS app)"]
+    A["AudioRecorder<br/>ScreenCaptureKit + AVFoundation"] --> B["Merge Tracks<br/>remote + mic"]
+    B --> C["MeetingTask"]
+    C --> D["MeetingPipelineManager<br/>State machine"]
+    D -->|Transcode| E["AVAssetExportSession<br/>mixed_48k.m4a"]
+    D -->|Persist| J["DatabaseManager<br/>SQLite"]
+    D -->|Config| S["SettingsStore"]
+    S --> K["KeychainHelper<br/>AK/SK"]
+    J --> V["SwiftUI Views<br/>SettingsView / PipelineView / ResultView"]
+  end
+
+  subgraph Cloud["Alibaba Cloud"]
+    F["OSSService<br/>PutObject"] --> G["OSS Bucket<br/>Public URL"]
+    T["TingwuService<br/>CreateTask / GetTaskInfo"] --> R["Tingwu Offline ASR<br/>Minutes JSON"]
+  end
+
+  D -->|Upload| F
+  G -->|FileUrl| T
+  T -->|Result| D
+```
 
 ## Project Structure
 
@@ -25,7 +53,7 @@ A professional, high-fidelity audio recording utility for macOS, specifically de
 
 ## Getting Started
 
-### 1. Build and Run
+### 1. Build and Run (recommended)
 
 Due to macOS security requirements (ScreenCaptureKit needs specific entitlements and signing), we provide a convenience script for local execution:
 
@@ -43,12 +71,26 @@ When you first start recording, macOS will request the following permissions:
 
 Please grant these permissions in **System Settings > Privacy & Security**.
 
-### 3. Audio Outputs
+### 3. Configure Tingwu + OSS (optional)
 
-Recordings are saved to your `Downloads` directory with the following naming convention:
+Open Settings in the app and configure:
+- Alibaba Cloud AccessKeyId / AccessKeySecret (stored in Keychain)
+- Tingwu AppKey
+- OSS bucket / region / prefix
+
+### 4. Audio Outputs
+
+Raw recordings are saved to your `Downloads` directory:
+
 - `remote_[timestamp]_[id].m4a`: The other person's voice.
 - `local_[timestamp]_[id].m4a`: Your voice.
 - `mixed_[timestamp]_[id].m4a`: The merged conversation.
+
+### 5. Generate minutes
+
+After a recording completes, the latest task appears in the pipeline UI. Trigger the steps manually:
+- Transcode → Upload → Create Task → Refresh Status
+- View Result → Export Markdown
 
 ## Development
 
@@ -64,9 +106,15 @@ Ensure you configure **Signing & Capabilities** with your Development Team to ru
 
 - [x] Dual-track recording (Remote + Local)
 - [x] Automatic audio merging
-- [ ] Alibaba Cloud ASR integration for speech-to-text
-- [ ] Speaker diarization (Cloud-based)
+- [x] Alibaba Cloud Tingwu offline transcription + minutes generation
+- [x] OSS upload integration
+- [x] Manual pipeline UI (transcode/upload/create/poll)
+- [ ] Speaker diarization (cloud-based)
 - [ ] Real-time transcription UI
+
+## Contact
+
+sherlock.yin1994@gmail.com
 
 ## License
 
