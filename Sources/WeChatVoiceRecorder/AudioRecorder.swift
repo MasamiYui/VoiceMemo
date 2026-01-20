@@ -157,6 +157,10 @@ class AudioRecorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegat
               let streamDesc = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else { return }
         
         do {
+            if FileManager.default.fileExists(atPath: url.path) {
+                try? FileManager.default.removeItem(at: url)
+            }
+            
             remoteAssetWriter = try AVAssetWriter(outputURL: url, fileType: .m4a)
             let settings: [String: Any] = [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -171,6 +175,7 @@ class AudioRecorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegat
                 writer.add(input)
                 writer.startWriting()
                 writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+                self.settings.log("Remote writer started successfully")
             }
         } catch {
             settings.log("Remote writer error: \(error.localizedDescription)")
@@ -209,6 +214,10 @@ class AudioRecorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegat
               let streamDesc = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else { return }
         
         do {
+            if FileManager.default.fileExists(atPath: url.path) {
+                try? FileManager.default.removeItem(at: url)
+            }
+            
             micAssetWriter = try AVAssetWriter(outputURL: url, fileType: .m4a)
             let settings: [String: Any] = [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -223,6 +232,7 @@ class AudioRecorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegat
                 writer.add(input)
                 writer.startWriting()
                 writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+                self.settings.log("Mic writer started successfully")
             }
         } catch {
             settings.log("Mic writer error: \(error.localizedDescription)")
@@ -237,17 +247,27 @@ class AudioRecorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegat
             // 1. Stop System Audio
             try? await stream?.stopCapture()
             stream = nil
-            if let writer = remoteAssetWriter, writer.status == .writing {
-                remoteAssetWriterInput?.markAsFinished()
-                await writer.finishWriting()
+            if let writer = remoteAssetWriter {
+                if writer.status == .writing {
+                    remoteAssetWriterInput?.markAsFinished()
+                    await writer.finishWriting()
+                    settings.log("Remote writer finished. Final status: \(writer.status.rawValue)")
+                } else {
+                    settings.log("Remote writer was not writing. Status: \(writer.status.rawValue), Error: \(String(describing: writer.error))")
+                }
             }
             
             // 2. Stop Microphone
             micSession?.stopRunning()
             micSession = nil
-            if let writer = micAssetWriter, writer.status == .writing {
-                micAssetWriterInput?.markAsFinished()
-                await writer.finishWriting()
+            if let writer = micAssetWriter {
+                if writer.status == .writing {
+                    micAssetWriterInput?.markAsFinished()
+                    await writer.finishWriting()
+                    settings.log("Mic writer finished. Final status: \(writer.status.rawValue)")
+                } else {
+                    settings.log("Mic writer was not writing. Status: \(writer.status.rawValue), Error: \(String(describing: writer.error))")
+                }
             }
             
             // 3. Merge
@@ -291,22 +311,50 @@ class AudioRecorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegat
         let asset1 = AVURLAsset(url: audio1)
         let asset2 = AVURLAsset(url: audio2)
         
-        let track1 = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
-        let track2 = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+        var hasTrack1 = false
+        var hasTrack2 = false
         
-        if let sourceTrack1 = try await asset1.loadTracks(withMediaType: .audio).first,
-           let sourceTrack2 = try await asset2.loadTracks(withMediaType: .audio).first {
-            let range1 = CMTimeRange(start: .zero, duration: try await asset1.load(.duration))
-            let range2 = CMTimeRange(start: .zero, duration: try await asset2.load(.duration))
-            
-            try track1?.insertTimeRange(range1, of: sourceTrack1, at: .zero)
-            try track2?.insertTimeRange(range2, of: sourceTrack2, at: .zero)
+        do {
+            if let tracks1 = try? await asset1.loadTracks(withMediaType: .audio), let sourceTrack1 = tracks1.first {
+                let track1 = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+                let duration = try await asset1.load(.duration)
+                try track1?.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: sourceTrack1, at: .zero)
+                hasTrack1 = true
+            }
+        } catch {
+            settings.log("Warning: Could not load track 1: \(error.localizedDescription)")
         }
         
-        guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else { return }
+        do {
+            if let tracks2 = try? await asset2.loadTracks(withMediaType: .audio), let sourceTrack2 = tracks2.first {
+                let track2 = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+                let duration = try await asset2.load(.duration)
+                try track2?.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: sourceTrack2, at: .zero)
+                hasTrack2 = true
+            }
+        } catch {
+            settings.log("Warning: Could not load track 2: \(error.localizedDescription)")
+        }
+        
+        guard hasTrack1 || hasTrack2 else {
+            throw NSError(domain: "AudioRecorder", code: 404, userInfo: [NSLocalizedDescriptionKey: "No valid audio tracks found to merge"])
+        }
+        
+        if FileManager.default.fileExists(atPath: output.path) {
+            try? FileManager.default.removeItem(at: output)
+        }
+        
+        guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
+            throw NSError(domain: "AudioRecorder", code: 500, userInfo: [NSLocalizedDescriptionKey: "Failed to create export session"])
+        }
+        
         export.outputURL = output
         export.outputFileType = .m4a
         await export.export()
+        
+        if let error = export.error {
+            throw error
+        }
     }
     
     // MARK: - Delegates
@@ -320,7 +368,9 @@ class AudioRecorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegat
             isFirstRemoteBuffer = false
         }
         if let input = remoteAssetWriterInput, input.isReadyForMoreMediaData {
-            input.append(sampleBuffer)
+            if !input.append(sampleBuffer) {
+                settings.log("Remote append error: \(String(describing: remoteAssetWriter?.error))")
+            }
         }
     }
     
@@ -337,7 +387,9 @@ class AudioRecorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegat
             isFirstMicBuffer = false
         }
         if let input = micAssetWriterInput, input.isReadyForMoreMediaData {
-            input.append(sampleBuffer)
+            if !input.append(sampleBuffer) {
+                settings.log("Mic append error: \(String(describing: micAssetWriter?.error))")
+            }
         }
     }
 }

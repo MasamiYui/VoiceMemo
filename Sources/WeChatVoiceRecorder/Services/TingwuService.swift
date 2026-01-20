@@ -35,9 +35,7 @@ class TingwuService {
         let url = URL(string: "https://tingwu.cn-beijing.aliyuncs.com/openapi/tingwu/v2/tasks")!
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
-        request.addValue("offline", forHTTPHeaderField: "type") // Query param usually, but let's check.
-        // Wait, search result showed query param type=realtime.
-        // Let's put type=offline in query
+        request.setValue("CreateTask", forHTTPHeaderField: "x-acs-action")
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "type", value: "offline")]
         request.url = components.url
@@ -73,6 +71,7 @@ class TingwuService {
         let url = URL(string: "https://tingwu.cn-beijing.aliyuncs.com/openapi/tingwu/v2/tasks/\(taskId)")!
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.setValue("GetTaskInfo", forHTTPHeaderField: "x-acs-action")
         
         try await signRequest(&request, body: nil)
         
@@ -114,43 +113,38 @@ class TingwuService {
         
         let nonce = UUID().uuidString
         
-        request.addValue(timestamp, forHTTPHeaderField: "x-acs-date")
-        request.addValue(nonce, forHTTPHeaderField: "x-acs-signature-nonce")
-        request.addValue("ACS3-HMAC-SHA256", forHTTPHeaderField: "x-acs-signature-method")
-        request.addValue("2023-09-30", forHTTPHeaderField: "x-acs-version") // Version from search result
-        // Wait, search result 2 said "2023-09-30" but search result 5 said "2022-09-30".
-        // Search result 2 title: "API-tingwu-2023-09-30". So use 2023-09-30.
+        request.setValue(timestamp, forHTTPHeaderField: "x-acs-date")
+        request.setValue(nonce, forHTTPHeaderField: "x-acs-signature-nonce")
+        request.setValue("ACS3-HMAC-SHA256", forHTTPHeaderField: "x-acs-signature-method")
+        request.setValue("2023-09-30", forHTTPHeaderField: "x-acs-version")
         
         // Content-SHA256
         let contentSha256: String
         if let body = body {
             contentSha256 = SHA256.hash(data: body).map { String(format: "%02x", $0) }.joined()
         } else {
-             // Empty string hash
-             contentSha256 = SHA256.hash(data: Data()).map { String(format: "%02x", $0) }.joined()
+            contentSha256 = SHA256.hash(data: Data()).map { String(format: "%02x", $0) }.joined()
         }
-        request.addValue(contentSha256, forHTTPHeaderField: "x-acs-content-sha256")
+        request.setValue(contentSha256, forHTTPHeaderField: "x-acs-content-sha256")
         
         // 2. Canonical Request
         let method = request.httpMethod ?? "GET"
         let uri = request.url?.path ?? "/"
-        let query = request.url?.query ?? "" // Needs to be sorted and percent encoded.
-        // Since we only use simple query or no query, simple string is fine if already encoded.
-        // But strictly, we should sort query params.
-        // For CreateTask: type=offline.
-        // For GetTaskInfo: no query.
+        let query = canonicalQuery(from: request.url)
         
         // Canonical Headers
         // Lowercase keys, sorted, trim value.
         // We signed: host, x-acs-content-sha256, x-acs-date, x-acs-signature-nonce, x-acs-signature-method, x-acs-version
         // And maybe Content-Type if present.
         
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.addValue("tingwu.cn-beijing.aliyuncs.com", forHTTPHeaderField: "host")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let host = request.url?.host {
+            request.setValue(host, forHTTPHeaderField: "host")
+        }
         
-        let headersToSign = [
-            "content-type": "application/json",
-            "host": "tingwu.cn-beijing.aliyuncs.com",
+        var headersToSign: [String: String] = [
+            "content-type": request.value(forHTTPHeaderField: "Content-Type") ?? "application/json",
+            "host": request.value(forHTTPHeaderField: "host") ?? (request.url?.host ?? ""),
             "x-acs-content-sha256": contentSha256,
             "x-acs-date": timestamp,
             "x-acs-signature-method": "ACS3-HMAC-SHA256",
@@ -158,35 +152,69 @@ class TingwuService {
             "x-acs-version": "2023-09-30"
         ]
         
-        let sortedHeaderKeys = headersToSign.keys.sorted()
-        let canonicalHeaders = sortedHeaderKeys.map { "\($0):\(headersToSign[$0]!)" }.joined(separator: "\n")
-        let signedHeaders = sortedHeaderKeys.joined(separator: ";")
+        if let action = request.value(forHTTPHeaderField: "x-acs-action"), !action.isEmpty {
+            headersToSign["x-acs-action"] = action
+        }
         
-        let canonicalRequest = """
-        \(method)
-        \(uri)
-        \(query)
-        \(canonicalHeaders)
-        
-        \(signedHeaders)
-        \(contentSha256)
-        """
+        let signedHeaders = headersToSign.keys.sorted().joined(separator: ";")
+        let canonicalRequest = buildCanonicalRequest(
+            method: method,
+            uri: uri,
+            query: query,
+            headers: headersToSign,
+            contentSha256: contentSha256
+        )
         
         let canonicalRequestHash = SHA256.hash(data: canonicalRequest.data(using: .utf8)!).map { String(format: "%02x", $0) }.joined()
+        if settings.enableVerboseLogging {
+            settings.log("Tingwu canonical request: \(canonicalRequest)")
+            settings.log("Tingwu canonical request hash: \(canonicalRequestHash)")
+        }
         
         // 3. String To Sign
-        let stringToSign = """
-        ACS3-HMAC-SHA256
-        \(timestamp)
-        \(canonicalRequestHash)
-        """
+        let stringToSign = "ACS3-HMAC-SHA256\n\(canonicalRequestHash)"
         
         // 4. Signature
         let signature = hmac(key: akSecret, string: stringToSign)
+        if settings.enableVerboseLogging {
+            settings.log("Tingwu string to sign: \(stringToSign)")
+            settings.log("Tingwu signature: \(signature)")
+        }
         
         // 5. Authorization Header
         let auth = "ACS3-HMAC-SHA256 Credential=\(akId),SignedHeaders=\(signedHeaders),Signature=\(signature)"
-        request.addValue(auth, forHTTPHeaderField: "Authorization")
+        request.setValue(auth, forHTTPHeaderField: "Authorization")
+    }
+
+    func buildCanonicalRequest(method: String, uri: String, query: String, headers: [String: String], contentSha256: String) -> String {
+        let sortedHeaderKeys = headers.keys.sorted()
+        let canonicalHeaders = sortedHeaderKeys.map { "\($0):\(headers[$0]!)" }.joined(separator: "\n")
+        let signedHeaders = sortedHeaderKeys.joined(separator: ";")
+        return "\(method)\n\(uri)\n\(query)\n\(canonicalHeaders)\n\n\(signedHeaders)\n\(contentSha256)"
+    }
+    
+    private func canonicalQuery(from url: URL?) -> String {
+        guard let url else { return "" }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return "" }
+        guard let items = components.queryItems, !items.isEmpty else { return "" }
+        let encodedItems = items.map { item -> (String, String) in
+            let name = percentEncode(item.name)
+            let value = percentEncode(item.value ?? "")
+            return (name, value)
+        }
+        let sortedItems = encodedItems.sorted {
+            if $0.0 == $1.0 {
+                return $0.1 < $1.1
+            }
+            return $0.0 < $1.0
+        }
+        return sortedItems.map { "\($0.0)=\($0.1)" }.joined(separator: "&")
+    }
+    
+    private func percentEncode(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-_.~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
     
     private func hmac(key: String, string: String) -> String {
