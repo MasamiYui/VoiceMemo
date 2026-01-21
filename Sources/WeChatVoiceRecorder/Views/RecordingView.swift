@@ -37,6 +37,24 @@ struct RecordingView: View {
             .disabled(recorder.isRecording)
             .padding(.horizontal)
             
+            // Mode Selection
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Recognition Mode:")
+                Picker("Recognition Mode", selection: $recorder.recordingMode) {
+                    Text("Mixed (Default)").tag(MeetingMode.mixed)
+                    Text("Dual-Speaker Separated").tag(MeetingMode.separated)
+                }
+                .pickerStyle(.segmented)
+                
+                if recorder.recordingMode == .separated {
+                    Text("Separated mode treats System Audio as Speaker 2 (Remote) and Microphone as Speaker 1 (Local). They will be recognized independently.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .disabled(recorder.isRecording)
+            .padding(.horizontal)
+            
             HStack {
                 Button("Refresh Apps") {
                     Task { await recorder.refreshAvailableApps() }

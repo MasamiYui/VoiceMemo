@@ -10,6 +10,7 @@ class AudioRecorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegat
     @Published var availableApps: [SCRunningApplication] = []
     @Published var selectedApp: SCRunningApplication?
     @Published var latestTask: MeetingTask?
+    @Published var recordingMode: MeetingMode = .mixed
     
     var lastUploadedURL: URL? {
         if let urlStr = latestTask?.ossUrl {
@@ -294,30 +295,49 @@ class AudioRecorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegat
                 }
             }
             
-            // 3. Merge
+            // 3. Merge or Separated
             if let rURL = remoteURL, let lURL = localURL, let recId = recordingId {
-                settings.log("Merge start: remote=\(rURL.path) local=\(lURL.path)")
-                await MainActor.run { self.statusMessage = "Merging audio files..." }
-                let mixedURL = rURL.deletingLastPathComponent().appendingPathComponent(rURL.lastPathComponent.replacingOccurrences(of: "remote", with: "mixed"))
-                do {
-                    try await mergeAudioFiles(audio1: rURL, audio2: lURL, output: mixedURL)
+                if self.recordingMode == .mixed {
+                    settings.log("Merge start: remote=\(rURL.path) local=\(lURL.path)")
+                    await MainActor.run { self.statusMessage = "Merging audio files..." }
+                    let mixedURL = rURL.deletingLastPathComponent().appendingPathComponent(rURL.lastPathComponent.replacingOccurrences(of: "remote", with: "mixed"))
+                    do {
+                        try await mergeAudioFiles(audio1: rURL, audio2: lURL, output: mixedURL)
+                        await MainActor.run {
+                            self.isRecording = false
+                            self.statusMessage = "Saved 3 files to Downloads/WeChatRecordings"
+                            
+                            // Create Meeting Task
+                            let title = "Meeting \(recId)"
+                            let task = MeetingTask(recordingId: recId, localFilePath: mixedURL.path, title: title)
+                            DatabaseManager.shared.saveTask(task)
+                            self.latestTask = task
+                        }
+                        settings.log("Merge success: mixed=\(mixedURL.path)")
+                    } catch {
+                        await MainActor.run {
+                            self.isRecording = false
+                            self.statusMessage = "Merge failed: \(error.localizedDescription)"
+                        }
+                        settings.log("Merge failed: \(error.localizedDescription)")
+                    }
+                } else {
+                    // Separated Mode
+                    settings.log("Separated mode: Skip merge. remote=\(rURL.path) local=\(lURL.path)")
                     await MainActor.run {
                         self.isRecording = false
-                        self.statusMessage = "Saved 3 files to Downloads/WeChatRecordings"
+                        self.statusMessage = "Saved 2 files (Separated) to Downloads/WeChatRecordings"
                         
-                        // Create Meeting Task
-                        let title = "Meeting \(recId)"
-                        let task = MeetingTask(recordingId: recId, localFilePath: mixedURL.path, title: title)
+                        let title = "Meeting \(recId) (Separated)"
+                        // Use Mic (Local) as primary display file
+                        var task = MeetingTask(recordingId: recId, localFilePath: lURL.path, title: title)
+                        task.mode = .separated
+                        task.speaker1AudioPath = lURL.path // Mic (Local) -> Speaker 1
+                        task.speaker2AudioPath = rURL.path // System (Remote) -> Speaker 2
+                        
                         DatabaseManager.shared.saveTask(task)
                         self.latestTask = task
                     }
-                    settings.log("Merge success: mixed=\(mixedURL.path)")
-                } catch {
-                    await MainActor.run {
-                        self.isRecording = false
-                        self.statusMessage = "Merge failed: \(error.localizedDescription)"
-                    }
-                    settings.log("Merge failed: \(error.localizedDescription)")
                 }
             }
             
