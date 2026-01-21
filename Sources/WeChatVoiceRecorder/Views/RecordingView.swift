@@ -6,6 +6,7 @@ struct RecordingView: View {
     @ObservedObject var settings: SettingsStore
     
     var body: some View {
+        let controlWidth: CGFloat = 360
         ScrollView {
             VStack(spacing: 24) {
                 // Header & Status
@@ -35,7 +36,6 @@ struct RecordingView: View {
 
                 // Configuration Card
                 VStack(spacing: 24) {
-                    // App Selection Row
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Image(systemName: "app.badge")
@@ -61,12 +61,12 @@ struct RecordingView: View {
                             }
                         }
                         .labelsHidden()
-                        .frame(maxWidth: 300) // Fixed max width for better alignment
+                        .frame(width: controlWidth, alignment: .leading)
                     }
+                    .frame(width: controlWidth, alignment: .leading)
                     
                     Divider()
 
-                    // Mode Selection Row
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             Image(systemName: "waveform.and.mic")
@@ -81,26 +81,26 @@ struct RecordingView: View {
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
-                        .frame(maxWidth: 400) // Consistent width
+                        .frame(width: controlWidth, alignment: .leading)
                         
-                        // Description area
                         ZStack(alignment: .topLeading) {
                             if recorder.recordingMode == .separated {
                                 Text("Separated mode treats System Audio as Speaker 2 (Remote) and Microphone as Speaker 1 (Local). They will be recognized independently.")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                    .lineLimit(2)
                                     .transition(.opacity)
                             } else {
                                 Text("Mixed mode combines all audio sources into a single track for recognition. Suitable for general recordings.")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                    .lineLimit(2)
                                     .transition(.opacity)
                             }
                         }
-                        .frame(minHeight: 32, alignment: .topLeading)
+                        .frame(width: controlWidth, height: 44, alignment: .topLeading)
                     }
+                    .frame(width: controlWidth, alignment: .leading)
                 }
                 .padding(24)
                 .background(
