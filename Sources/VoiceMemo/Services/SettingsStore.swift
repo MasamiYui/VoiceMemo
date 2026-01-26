@@ -164,8 +164,12 @@ class SettingsStore: ObservableObject {
     }
     
     func readLogText() -> String {
-        let url = logFileURL()
-        return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        var logContent = ""
+        logQueue.sync {
+            let url = logFileURL()
+            logContent = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        }
+        return logContent
     }
     
     func clearLogFile() {
