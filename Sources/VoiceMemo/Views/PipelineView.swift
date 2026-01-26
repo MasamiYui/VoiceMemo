@@ -55,6 +55,14 @@ struct PipelineView: View {
             }
             .padding(.vertical)
             
+            // Separated Mode Status
+            if manager.task.mode == .separated {
+                SeparatedStatusView(task: manager.task) { speakerId in
+                    Task { await manager.retry(speaker: speakerId) }
+                }
+                .padding(.bottom, 10)
+            }
+            
             Divider()
             
             // Action Area
@@ -200,20 +208,35 @@ struct PipelineView: View {
             
         case .failed:
             VStack {
-                if let failedStep = manager.task.failedStep {
-                    Text("Failed at: \(failedStep.rawValue.capitalized)")
-                        .foregroundColor(.red)
-                        .font(.caption)
-                    
-                    Button("Retry \(failedStep.rawValue.capitalized)") {
-                        Task { await manager.retry() }
+                if manager.task.mode == .mixed {
+                    if let failedStep = manager.task.failedStep {
+                        Text("Failed at: \(failedStep.rawValue.capitalized)")
+                            .foregroundColor(.red)
+                            .font(.caption)
+                        
+                        Button("Retry \(failedStep.rawValue.capitalized)") {
+                            Task { await manager.retry() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    } else {
+                        Button("Retry Last Step") {
+                            Task { await manager.retry() }
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    .buttonStyle(.borderedProminent)
                 } else {
-                    Button("Retry Last Step") {
-                        Task { await manager.retry() }
+                    // Separated mode retry handled in SeparatedStatusView mostly
+                    // But provide a global retry if generic failure
+                    if manager.task.speaker1Status == .failed || manager.task.speaker2Status == .failed {
+                         Text("Check individual speakers above")
+                            .foregroundColor(.secondary)
+                            .font(.caption)
+                    } else {
+                         Button("Retry Last Step") {
+                             Task { await manager.retry() }
+                         }
+                         .buttonStyle(.borderedProminent)
                     }
-                    .buttonStyle(.borderedProminent)
                 }
                 
                 Button("Restart from Beginning") {
@@ -259,6 +282,103 @@ struct PipelineView: View {
     }
 }
 
+struct SeparatedStatusView: View {
+    let task: MeetingTask
+    let onRetry: (Int) -> Void
+    
+    var body: some View {
+        HStack(spacing: 40) {
+            SpeakerStatusItem(
+                name: "Speaker 1 (Local)",
+                status: task.speaker1Status,
+                failedStep: task.speaker1FailedStep,
+                globalStatus: task.status,
+                onRetry: { onRetry(1) }
+            )
+            
+            SpeakerStatusItem(
+                name: "Speaker 2 (Remote)",
+                status: task.speaker2Status,
+                failedStep: task.speaker2FailedStep,
+                globalStatus: task.status,
+                onRetry: { onRetry(2) }
+            )
+        }
+        .padding()
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .cornerRadius(8)
+    }
+}
+
+struct SpeakerStatusItem: View {
+    let name: String
+    let status: MeetingTaskStatus?
+    let failedStep: MeetingTaskStatus?
+    let globalStatus: MeetingTaskStatus
+    let onRetry: () -> Void
+    
+    var displayStatus: String {
+        if let status = status {
+            return status.rawValue.capitalized
+        }
+        // Fallback to global status if individual status is not yet tracked (e.g. pre-polling)
+        if globalStatus == .polling {
+            return "Pending..."
+        }
+        return globalStatus.rawValue.capitalized
+    }
+    
+    var statusColor: Color {
+        if let status = status {
+            switch status {
+            case .completed: return .green
+            case .failed: return .red
+            default: return .orange
+            }
+        }
+        switch globalStatus {
+        case .completed: return .green
+        case .failed: return .red
+        default: return .secondary
+        }
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(name)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+            
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 8, height: 8)
+                
+                Text(displayStatus)
+                    .font(.subheadline)
+                    .foregroundColor(.primary)
+                
+                if status == .failed {
+                    Button(action: onRetry) {
+                        Image(systemName: "arrow.clockwise.circle.fill")
+                            .foregroundColor(.red)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Retry this speaker")
+                }
+            }
+            
+            if let step = failedStep {
+                Text("Failed at: \(step.rawValue)")
+                    .font(.caption2)
+                    .foregroundColor(.red)
+            }
+        }
+        .frame(minWidth: 120, alignment: .leading)
+    }
+}
+
 struct StepView: View {
     let title: String
     let icon: String
@@ -269,10 +389,10 @@ struct StepView: View {
     var body: some View {
         VStack {
             Image(systemName: icon)
-                .font(.title2)
-                .foregroundColor(isFailed ? .red : (isCompleted ? .green : (isActive ? .blue : .gray)))
-                .frame(width: 40, height: 40)
-                .background(Circle().fill(isFailed ? Color.red.opacity(0.1) : Color.gray.opacity(0.1)))
+            .font(.title2)
+            .foregroundColor(isFailed ? .red : (isCompleted ? .green : (isActive ? .blue : .gray)))
+            .frame(width: 40, height: 40)
+            .background(Circle().fill(isFailed ? Color.red.opacity(0.1) : Color.gray.opacity(0.1)))
             
             Text(title)
                 .font(.caption)

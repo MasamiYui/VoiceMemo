@@ -65,6 +65,8 @@ struct MeetingTask: Identifiable, Codable, Hashable, Equatable {
     // Status for Separated Mode
     var speaker1Status: MeetingTaskStatus?
     var speaker2Status: MeetingTaskStatus?
+    var speaker1FailedStep: MeetingTaskStatus?
+    var speaker2FailedStep: MeetingTaskStatus?
     
     // Error & Retry
     var lastError: String?
