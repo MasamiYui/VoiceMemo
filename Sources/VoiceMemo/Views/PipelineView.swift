@@ -23,7 +23,7 @@ struct PipelineView: View {
                 
                 ArrowView()
                 
-                stepButton(title: "Upload Raw", icon: "arrow.up.doc.fill", step: .uploadingOriginal)
+                stepButton(title: "Upload Raw", icon: "arrow.up.doc.fill", step: .uploadingRaw)
                 ArrowView()
                 stepButton(title: "Transcode", icon: "waveform", step: .transcoding)
                 ArrowView()
@@ -142,7 +142,7 @@ struct PipelineView: View {
     
     private func stepTitle(_ step: MeetingTaskStatus) -> String {
         switch step {
-        case .uploadingOriginal: return "Upload Raw"
+        case .uploadingRaw: return "Upload Raw"
         case .transcoding: return "Transcode"
         case .uploading: return "Upload"
         case .created: return "Create Task"
@@ -154,7 +154,7 @@ struct PipelineView: View {
     private func rerun(_ step: MeetingTaskStatus) {
         Task {
             switch step {
-            case .uploadingOriginal: await manager.uploadOriginal()
+            case .uploadingRaw: await manager.uploadOriginal()
             case .transcoding: await manager.transcode(force: true)
             case .uploading: await manager.upload()
             case .created: await manager.createTask()
@@ -174,7 +174,7 @@ struct PipelineView: View {
     }
     
     private func isAfter(_ status: MeetingTaskStatus) -> Bool {
-        let order: [MeetingTaskStatus] = [.recorded, .uploadingOriginal, .uploadedOriginal, .transcoding, .transcoded, .uploading, .uploaded, .created, .polling, .completed]
+        let order: [MeetingTaskStatus] = [.recorded, .uploadingRaw, .uploadedRaw, .transcoding, .transcoded, .uploading, .uploaded, .created, .polling, .completed]
         
         let currentStatus: MeetingTaskStatus
         if manager.task.status == .failed {
@@ -202,8 +202,8 @@ struct PipelineView: View {
         
         // 2. Waiting for next step (Manual mode readiness)
         switch (manager.task.status, step) {
-        case (.recorded, .uploadingOriginal): return true
-        case (.uploadedOriginal, .transcoding): return true
+        case (.recorded, .uploadingRaw): return true
+        case (.uploadedRaw, .transcoding): return true
         case (.transcoded, .uploading): return true
         case (.uploaded, .created): return true
         case (.created, .polling): return true
@@ -229,11 +229,11 @@ struct PipelineView: View {
             VStack {
                 if manager.task.mode == .mixed {
                     if let failedStep = manager.task.failedStep {
-                        Text("Failed at: \(failedStep.rawValue.capitalized)")
+                        Text("Failed at: \(failedStep.displayName)")
                             .foregroundColor(.red)
                             .font(.caption)
                         
-                        Button("Retry \(failedStep.rawValue.capitalized)") {
+                        Button("Retry \(failedStep.displayName)") {
                             Task { await manager.retry() }
                         }
                         .buttonStyle(.borderedProminent)
@@ -267,10 +267,10 @@ struct PipelineView: View {
                 .padding(.top, 4)
             }
             
-        case .uploadingOriginal:
+        case .uploadingRaw:
             Text("Uploading Original...")
             
-        case .uploadedOriginal:
+        case .uploadedRaw:
             Button("Start Transcode") {
                 Task { await manager.transcode() }
             }
@@ -350,13 +350,13 @@ struct SpeakerStatusItem: View {
     
     var displayStatus: String {
         if let status = status {
-            return status.rawValue.capitalized
+            return status.displayName
         }
         // Fallback to global status if individual status is not yet tracked (e.g. pre-polling)
         if globalStatus == .polling {
             return "Pending..."
         }
-        return globalStatus.rawValue.capitalized
+        return globalStatus.displayName
     }
     
     var statusColor: Color {
@@ -401,7 +401,7 @@ struct SpeakerStatusItem: View {
             }
             
             if let step = failedStep {
-                Text("Failed at: \(step.rawValue)")
+                Text("Failed at: \(step.displayName)")
                     .font(.caption2)
                     .foregroundColor(.red)
             }
